@@ -6,8 +6,11 @@
 PLUGIN_ROOT="${NIGHTS_WATCH_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 MANAGER_SCRIPT="$PLUGIN_ROOT/claude-nights-watch-manager.sh"
 DAEMON_SCRIPT="$PLUGIN_ROOT/claude-nights-watch-daemon.sh"
-PID_FILE="$PLUGIN_ROOT/logs/claude-nights-watch-daemon.pid"
-LOG_FILE="$PLUGIN_ROOT/logs/claude-nights-watch-daemon.log"
+# PID and log files are written to the project directory by the daemon/manager,
+# not the plugin directory. Use CLAUDE_NIGHTS_WATCH_DIR (or CWD) to match.
+TASK_DIR="${CLAUDE_NIGHTS_WATCH_DIR:-$(pwd)}"
+PID_FILE="$TASK_DIR/logs/claude-nights-watch-daemon.pid"
+LOG_FILE="$TASK_DIR/logs/claude-nights-watch-daemon.log"
 
 # MCP Protocol Implementation
 # This is a simplified MCP server that responds to tool calls
