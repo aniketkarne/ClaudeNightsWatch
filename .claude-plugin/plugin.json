@@ -20,7 +20,7 @@
     "workflow",
     "ci-cd"
   ],
-  "hooks": "./hooks.json",
+  "hooks": "./hooks/hooks.json",
   "mcpServers": "./.mcp.json"
 }
 

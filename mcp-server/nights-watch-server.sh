@@ -154,7 +154,7 @@ get_daemon_status() {
     local status="stopped"
     local pid=""
     local details=""
-    
+
     if [ -f "$PID_FILE" ]; then
         pid=$(cat "$PID_FILE")
         if kill -0 "$pid" 2>/dev/null; then
@@ -166,7 +166,7 @@ get_daemon_status() {
     else
         details="Daemon is not running (no PID file)"
     fi
-    
+
     cat << EOF
 {
   "jsonrpc": "2.0",
@@ -175,7 +175,7 @@ get_daemon_status() {
     "content": [
       {
         "type": "text",
-        "text": $(jq -n --arg s "$status" --arg p "$pid" --arg d "$details" '{status: $s, pid: $p, details: $d}' | jq -c .)
+        "text": $(jq -n --arg s "$status" --arg p "$pid" --arg d "$details" '({status: $s, pid: $p, details: $d} | tojson)')
       }
     ]
   }
@@ -186,14 +186,14 @@ EOF
 start_daemon() {
     local start_time="$1"
     local args=""
-    
+
     if [ -n "$start_time" ]; then
         args="--at \"$start_time\""
     fi
-    
+
     local output=$(eval "$MANAGER_SCRIPT start $args" 2>&1)
     local exit_code=$?
-    
+
     cat << EOF
 {
   "jsonrpc": "2.0",
@@ -214,7 +214,7 @@ EOF
 stop_daemon() {
     local output=$("$MANAGER_SCRIPT" stop 2>&1)
     local exit_code=$?
-    
+
     cat << EOF
 {
   "jsonrpc": "2.0",
@@ -234,7 +234,7 @@ EOF
 
 get_logs() {
     local lines="${1:-50}"
-    
+
     if [ -f "$LOG_FILE" ]; then
         local logs=$(tail -n "$lines" "$LOG_FILE")
         cat << EOF
@@ -271,7 +271,7 @@ EOF
 
 read_task() {
     local path="${1:-./task.md}"
-    
+
     if [ -f "$path" ]; then
         local content=$(cat "$path")
         cat << EOF
@@ -309,7 +309,7 @@ EOF
 
 read_rules() {
     local path="${1:-./rules.md}"
-    
+
     if [ -f "$path" ]; then
         local content=$(cat "$path")
         cat << EOF
@@ -348,9 +348,9 @@ EOF
 write_task() {
     local content="$1"
     local path="${2:-./task.md}"
-    
+
     echo "$content" > "$path"
-    
+
     cat << EOF
 {
   "jsonrpc": "2.0",
@@ -370,9 +370,9 @@ EOF
 write_rules() {
     local content="$1"
     local path="${2:-./rules.md}"
-    
+
     echo "$content" > "$path"
-    
+
     cat << EOF
 {
   "jsonrpc": "2.0",
@@ -389,55 +389,73 @@ write_rules() {
 EOF
 }
 
+# Helper: send response as compact single-line JSON with correct request ID
+# MCP stdio transport requires NDJSON (one JSON object per line).
+# JSON-RPC requires the response id to match the request id.
+send_response() {
+    local id="$1"
+    if [ "$id" != "null" ] && [ -n "$id" ]; then
+        jq -c --argjson id "$id" '.id = $id'
+    else
+        jq -c .
+    fi
+}
+
 # Main MCP server loop
 # Read JSON-RPC requests from stdin and respond on stdout
 while IFS= read -r line; do
+    # Skip empty lines
+    [ -z "$line" ] && continue
+
     method=$(echo "$line" | jq -r '.method // empty')
-    
+    id=$(echo "$line" | jq '.id // null')
+
     case "$method" in
         "initialize")
-            handle_initialize
+            handle_initialize | send_response "$id"
+            ;;
+        "notifications/initialized")
+            # Notification — no response needed
             ;;
         "tools/list")
-            handle_list_tools
+            handle_list_tools | send_response "$id"
             ;;
         "tools/call")
             tool_name=$(echo "$line" | jq -r '.params.name')
             case "$tool_name" in
                 "get_daemon_status")
-                    get_daemon_status
+                    get_daemon_status | send_response "$id"
                     ;;
                 "start_daemon")
                     start_time=$(echo "$line" | jq -r '.params.arguments.start_time // empty')
-                    start_daemon "$start_time"
+                    start_daemon "$start_time" | send_response "$id"
                     ;;
                 "stop_daemon")
-                    stop_daemon
+                    stop_daemon | send_response "$id"
                     ;;
                 "get_logs")
                     lines=$(echo "$line" | jq -r '.params.arguments.lines // 50')
-                    get_logs "$lines"
+                    get_logs "$lines" | send_response "$id"
                     ;;
                 "read_task")
                     path=$(echo "$line" | jq -r '.params.arguments.path // "./task.md"')
-                    read_task "$path"
+                    read_task "$path" | send_response "$id"
                     ;;
                 "read_rules")
                     path=$(echo "$line" | jq -r '.params.arguments.path // "./rules.md"')
-                    read_rules "$path"
+                    read_rules "$path" | send_response "$id"
                     ;;
                 "write_task")
                     content=$(echo "$line" | jq -r '.params.arguments.content')
                     path=$(echo "$line" | jq -r '.params.arguments.path // "./task.md"')
-                    write_task "$content" "$path"
+                    write_task "$content" "$path" | send_response "$id"
                     ;;
                 "write_rules")
                     content=$(echo "$line" | jq -r '.params.arguments.content')
                     path=$(echo "$line" | jq -r '.params.arguments.path // "./rules.md"')
-                    write_rules "$content" "$path"
+                    write_rules "$content" "$path" | send_response "$id"
                     ;;
             esac
             ;;
     esac
 done
-
