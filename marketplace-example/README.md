@@ -7,7 +7,7 @@ Official marketplace for Claude Nights Watch and related productivity plugins fo
 Add this marketplace to your Claude Code:
 
 ```bash
-claude plugins marketplace add https://github.com/aniketkarne/claude-plugins-marketplace
+claude plugin marketplace add https://github.com/aniketkarne/ClaudeNightsWatch
 ```
 
 ## 📦 Available Plugins
@@ -20,7 +20,7 @@ Transform Claude from an interactive assistant into an autonomous worker that ex
 
 **Install:**
 ```bash
-claude plugins add claude-nights-watch
+claude plugin install claude-nights-watch@claude-nights-watch-marketplace
 ```
 
 **Key Features:**
@@ -36,7 +36,7 @@ claude plugins add claude-nights-watch
 **Quick Start:**
 ```bash
 # Install plugin
-claude plugins add claude-nights-watch
+claude plugin install claude-nights-watch@claude-nights-watch-marketplace
 
 # Run setup
 /nights-watch setup
@@ -129,20 +129,20 @@ Want to add your plugin to this marketplace?
 To update your installed plugins:
 
 ```bash
-claude plugins update
+claude plugin update claude-nights-watch
 ```
 
 ## 📞 Support
 
 ### For Marketplace Issues
-Open an issue on this repository: [GitHub Issues](https://github.com/aniketkarne/claude-plugins-marketplace/issues)
+Open an issue on this repository: [GitHub Issues](https://github.com/aniketkarne/ClaudeNightsWatch/issues)
 
 ### For Plugin-Specific Issues
 Contact the plugin author or open an issue on their repository.
 
 ### Community
 - Discord: [Claude Community](https://discord.gg/claude)
-- Discussions: [GitHub Discussions](https://github.com/aniketkarne/claude-plugins-marketplace/discussions)
+- Discussions: [GitHub Discussions](https://github.com/aniketkarne/ClaudeNightsWatch/discussions)
 
 ## 📄 License
 

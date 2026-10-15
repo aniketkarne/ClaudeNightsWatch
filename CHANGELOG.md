@@ -45,12 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- Fixed plugin manifest to comply with Claude Code plugin system requirements
-  - Removed `commands` and `agents` fields from manifest (auto-discovered from root directories)
-  - Moved `hooks.json` and `.mcp.json` into `.claude-plugin/` directory
-  - Updated manifest paths to use `./` prefix as required (paths cannot escape plugin directory with `../`)
-  - Both config files use `${CLAUDE_PLUGIN_ROOT}` variable to correctly reference root-level directories
-  - Changed plugin name from `claude-nights-watch` to `nights-watch` for cleaner slash command syntax
+- All three verify/test scripts (`verify-plugin.sh`, `test/test-plugin-comprehensive.sh`, `test/test-functional-realworld.sh`) were silently exiting after the first `[PASS]` because `set -e` plus the post-increment `((PASS++))` pattern made the first counter increment evaluate to 0 (a falsy exit code). The scripts printed headers and one pass line, then exited 0 with no test summary — meaning every CI run reported success while running zero tests. Removed `set -e` from all three, replaced `((PASS++))` with `PASS=$((PASS + 1))`, and added a comment explaining why a verification script must not use `set -e`. Replaced `mcp-server` copy step in functional test that was missing from `setup_test_environment`.
+- `test/test-plugin-comprehensive.sh` "Checking component paths" block failed on every run after the Nov 2025 plugin refactor because the manifest no longer carries explicit `commands`/`agents` fields (Claude Code auto-discovers them). Test now accepts either an explicit manifest field OR the auto-discovered root-level directory. Replaced the test's hardcoded `claude plugins add` install hint with the current `claude plugin install` syntax.
+- `test/test-functional-realworld.sh` had five latent post-refactor bugs that surfaced once the script could actually run to completion: (1) commands path resolution required the removed manifest field, (2) hooks test grep'd `CLAUDE_PLUGIN_ROOT` in the wrong file (it lives in `hooks/hooks.json`; the .sh scripts use `BASH_SOURCE`), (3) MCP server test grep'd `CLAUDE_PLUGIN_ROOT` but the server uses `NIGHTS_WATCH_ROOT`/`BASH_SOURCE`, (4) daemon "structural" test ran the daemon with `timeout 3s bash -c "$DAEMON --help"` which actually starts the daemon and never returns; replaced with `bash -n` syntax-only check, (5) manager "can access daemon components" test expected exit 0 but `manager.sh status` correctly exits 1 when the daemon is not running.
+- README install instructions and the two marketplace README files used the wrong CLI syntax (`claude plugins add`, `claude plugins marketplace add`). Replaced with the current `claude plugin install`, `claude plugin marketplace add`, `claude plugin list`, `claude plugin uninstall` (singular `plugin`). Also replaced the `claude-plugins-marketplace` repository URL with `ClaudeNightsWatch` (the marketplace is shipped inside this repo via `.claude-plugin/marketplace.json`; the referenced separate repo does not exist on github.com/aniketkarne).
 
 ### Planned
 - Web dashboard for monitoring and management

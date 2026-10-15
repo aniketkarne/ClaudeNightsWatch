@@ -60,15 +60,16 @@ Claude Nights Watch extends the auto-renewal concept to create a fully autonomou
 ### Option 1: As Claude Code Plugin
 #### Standard Installation 
 ```bash
-# Method 1: From marketplace (when available)
-claude plugins marketplace add https://github.com/aniketkarne/claude-plugins-marketplace
-claude plugins add claude-nights-watch
+# Method 1: From marketplace
+claude plugin marketplace add https://github.com/aniketkarne/ClaudeNightsWatch
+claude plugin install claude-nights-watch@claude-nights-watch-marketplace
 
 # Method 2: Direct from GitHub
-claude plugins add https://github.com/aniketkarne/ClaudeNightsWatch
+claude plugin install https://github.com/aniketkarne/ClaudeNightsWatch
 
 # Method 3: From local directory (for development)
-claude plugins add /path/to/ClaudeNightsWatch
+claude plugin marketplace add /path/to/ClaudeNightsWatch
+claude plugin install claude-nights-watch@claude-nights-watch-marketplace
 ```
 #### One-Command Installation
 Use the [Claude Plugins CLI](https://claude-plugins.dev) to skip the marketplace setup:
@@ -457,11 +458,11 @@ See `test/README.md` for detailed testing instructions.
 **Plugin not loading:**
 ```bash
 # Check plugin installation
-claude plugins list | grep claude-nights-watch
+claude plugin list | grep claude-nights-watch
 
 # Reinstall if needed
-claude plugins remove claude-nights-watch
-claude plugins add https://github.com/aniketkarne/ClaudeNightsWatch
+claude plugin uninstall claude-nights-watch
+claude plugin install https://github.com/aniketkarne/ClaudeNightsWatch
 
 # Debug mode
 claude --debug
@@ -567,7 +568,7 @@ If you're currently using the standalone daemon and want to migrate to the plugi
 
 1. **Install the plugin**:
    ```bash
-   claude plugins add https://github.com/aniketkarne/ClaudeNightsWatch
+   claude plugin install https://github.com/aniketkarne/ClaudeNightsWatch
    ```
 
 2. **Copy your existing files**:

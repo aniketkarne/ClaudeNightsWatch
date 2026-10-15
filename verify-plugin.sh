@@ -2,8 +2,13 @@
 
 # Claude Nights Watch Plugin Verification Script
 # Automated testing and validation
-
-set -e
+#
+# Note: deliberately NO `set -e`. A verification script must keep running
+# after individual test failures so it can count passes and fails and report
+# a summary. `set -e` plus the post-increment `((PASS++))` pattern causes
+# the script to exit on the very first pass (the post-increment evaluates
+# to the pre-increment value, which is 0 when the counter is at 0, and 0
+# is a falsy exit code that `set -e` treats as failure).
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")" && pwd)"
 PASS=0
@@ -22,12 +27,12 @@ print_test() {
 
 print_pass() {
     echo -e "${GREEN}[PASS]${NC} $1"
-    ((PASS++))
+    PASS=$((PASS + 1))
 }
 
 print_fail() {
     echo -e "${RED}[FAIL]${NC} $1"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
 }
 
 print_warn() {

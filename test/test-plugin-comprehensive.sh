@@ -2,8 +2,13 @@
 
 # Claude Nights Watch Plugin Comprehensive Test Suite
 # Tests all aspects of the plugin implementation and functionality
-
-set -e
+#
+# Note: deliberately NO `set -e`. A test suite must keep running after
+# individual test failures so it can count passes and fails and report a
+# summary. `set -e` plus the post-increment `((PASS++))` pattern causes
+# the script to exit on the very first pass (the post-increment evaluates
+# to the pre-increment value, which is 0 when the counter is at 0, and 0
+# is a falsy exit code that `set -e` treats as failure).
 
 # Colors for output
 RED='\033[0;31m'
@@ -32,12 +37,12 @@ print_test() {
 
 print_pass() {
     echo -e "${GREEN}[PASS]${NC} $1"
-    ((PASS++))
+    PASS=$((PASS + 1))
 }
 
 print_fail() {
     echo -e "${RED}[FAIL]${NC} $1"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
 }
 
 print_warn() {
@@ -130,7 +135,10 @@ test_plugin_manifest() {
 
     print_test "Checking component paths..."
 
-    # Check that component paths are specified
+    # Check that component paths are specified OR auto-discoverable.
+    # Claude Code auto-discovers `commands/` and `agents/` at the plugin
+    # root, so explicit fields are optional. (The Nov 2025 plugin refactor
+    # removed these from the manifest on purpose.)
     commands_path=$(jq -r '.commands // empty' "$MANIFEST")
     agents_path=$(jq -r '.agents // empty' "$MANIFEST")
     hooks_path=$(jq -r '.hooks // empty' "$MANIFEST")
@@ -138,14 +146,18 @@ test_plugin_manifest() {
 
     if [ -n "$commands_path" ]; then
         print_pass "Commands path: $commands_path"
+    elif [ -d "$PLUGIN_ROOT/commands" ]; then
+        print_pass "Commands auto-discovered from $PLUGIN_ROOT/commands/"
     else
-        print_fail "Commands path missing"
+        print_fail "Commands path missing and no commands/ directory to auto-discover"
     fi
 
     if [ -n "$agents_path" ]; then
         print_pass "Agents path: $agents_path"
+    elif [ -d "$PLUGIN_ROOT/agents" ]; then
+        print_pass "Agents auto-discovered from $PLUGIN_ROOT/agents/"
     else
-        print_fail "Agents path missing"
+        print_fail "Agents path missing and no agents/ directory to auto-discover"
     fi
 
     if [ -n "$hooks_path" ]; then
@@ -539,11 +551,24 @@ test_environment_variables() {
         print_fail "CLAUDE_PLUGIN_ROOT environment variable issue"
     fi
 
-    # Test that the variable is used correctly in hook scripts
-    if grep -q "CLAUDE_PLUGIN_ROOT" "$PLUGIN_ROOT/hooks/scripts/check-daemon-status.sh"; then
-        print_pass "Hook scripts use CLAUDE_PLUGIN_ROOT correctly"
+    # Test that the variable is used correctly in the hooks manifest.
+    # The variable appears in hooks/hooks.json (the manifest that names
+    # each hook command) — the .sh scripts themselves use BASH_SOURCE
+    # to derive a local path, which is the right pattern for portable
+    # direct invocation.
+    if grep -q "CLAUDE_PLUGIN_ROOT" "$PLUGIN_ROOT/hooks/hooks.json"; then
+        print_pass "Hooks manifest uses CLAUDE_PLUGIN_ROOT correctly"
     else
-        print_fail "Hook scripts don't use CLAUDE_PLUGIN_ROOT"
+        print_fail "Hooks manifest does not use CLAUDE_PLUGIN_ROOT"
+    fi
+
+    # The MCP server is configured via .claude-plugin/.mcp.json which
+    # passes NIGHTS_WATCH_ROOT in the env block. The script accepts
+    # NIGHTS_WATCH_ROOT or falls back to BASH_SOURCE derivation.
+    if grep -q "NIGHTS_WATCH_ROOT\|BASH_SOURCE" "$PLUGIN_ROOT/mcp-server/nights-watch-server.sh"; then
+        print_pass "MCP server resolves plugin root (NIGHTS_WATCH_ROOT or BASH_SOURCE)"
+    else
+        print_fail "MCP server does not resolve plugin root"
     fi
 
     unset CLAUDE_PLUGIN_ROOT
@@ -705,10 +730,11 @@ main() {
 
     echo ""
     echo -e "${BLUE}Plugin can be installed with:${NC}"
-    echo "  claude plugins add $PLUGIN_ROOT"
+    echo "  claude plugin marketplace add $PLUGIN_ROOT"
+    echo "  claude plugin install claude-nights-watch@claude-nights-watch-marketplace"
     echo ""
-    echo -e "${BLUE}Or from GitHub:${NC}"
-    echo "  claude plugins add https://github.com/aniketkarne/ClaudeNightsWatch"
+    echo -e "${BLUE}Or directly from GitHub:${NC}"
+    echo "  claude plugin install https://github.com/aniketkarne/ClaudeNightsWatch"
     echo ""
 
     # Exit with appropriate code

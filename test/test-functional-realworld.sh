@@ -2,8 +2,13 @@
 
 # Claude Nights Watch Plugin - Functional & Real-World Testing Suite
 # Tests actual functionality and simulates real-world usage scenarios
-
-set -e
+#
+# Note: deliberately NO `set -e`. A test suite must keep running after
+# individual test failures so it can count passes and fails and report a
+# summary. `set -e` plus the post-increment `((PASS++))` pattern causes
+# the script to exit on the very first pass (the post-increment evaluates
+# to the pre-increment value, which is 0 when the counter is at 0, and 0
+# is a falsy exit code that `set -e` treats as failure).
 
 # Colors for output
 RED='\033[0;31m'
@@ -33,17 +38,17 @@ print_test() {
 
 print_pass() {
     echo -e "${GREEN}[PASS]${NC} $1"
-    ((PASS++))
+    PASS=$((PASS + 1))
 }
 
 print_fail() {
     echo -e "${RED}[FAIL]${NC} $1"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
 }
 
 print_warn() {
     echo -e "${YELLOW}[WARN]${NC} $1"
-    ((WARN++))
+    WARN=$((WARN + 1))
 }
 
 print_info() {
@@ -70,11 +75,13 @@ setup_test_environment() {
     # Create temp directory for testing
     mkdir -p "$TEMP_DIR"
 
-    # Copy plugin files for testing
+    # Copy plugin files for testing (including mcp-server, which the
+    # .mcp.json entry references and the MCP tests need to inspect).
     cp -r "$PLUGIN_ROOT/.claude-plugin" "$TEMP_DIR/"
     cp -r "$PLUGIN_ROOT/commands" "$TEMP_DIR/"
     cp -r "$PLUGIN_ROOT/agents" "$TEMP_DIR/"
     cp -r "$PLUGIN_ROOT/hooks" "$TEMP_DIR/"
+    cp -r "$PLUGIN_ROOT/mcp-server" "$TEMP_DIR/"
     cp "$PLUGIN_ROOT/.mcp.json" "$TEMP_DIR/"
 
     if [ -d "$TEMP_DIR/.claude-plugin" ] && [ -d "$TEMP_DIR/commands" ]; then
@@ -136,10 +143,13 @@ test_plugin_installation() {
         print_pass "Plugin manifest accessible for installation"
 
         # Validate JSON structure
-        if jq -e '.name == "claude-nights-watch"' "$TEMP_DIR/.claude-plugin/plugin.json" >/dev/null 2>&1; then
-            print_pass "Plugin name correctly configured"
+        # The plugin was renamed from `claude-nights-watch` to `nights-watch`
+        # in the Nov 2025 refactor; accept either name.
+        PLUGIN_NAME=$(jq -r '.name // empty' "$TEMP_DIR/.claude-plugin/plugin.json")
+        if [ "$PLUGIN_NAME" = "claude-nights-watch" ] || [ "$PLUGIN_NAME" = "nights-watch" ]; then
+            print_pass "Plugin name correctly configured: $PLUGIN_NAME"
         else
-            print_fail "Plugin name not correctly configured"
+            print_fail "Plugin name not correctly configured: $PLUGIN_NAME"
         fi
 
         # Check version
@@ -155,19 +165,36 @@ test_plugin_installation() {
 
     print_test "Testing component path resolution..."
 
-    # Test that all component paths are resolvable
-    COMMANDS_PATH=$(jq -r '.commands' "$TEMP_DIR/.claude-plugin/plugin.json")
-    if [ -d "$TEMP_DIR/$COMMANDS_PATH" ]; then
-        print_pass "Commands path resolves correctly"
+    # Test that all component paths are resolvable. The Nov 2025 plugin
+    # refactor removed explicit `commands` and `agents` fields from the
+    # manifest — Claude Code auto-discovers the `commands/` and `agents/`
+    # directories at the plugin root, so the explicit field is optional.
+    # Accept either the manifest field OR the auto-discovered directory.
+    COMMANDS_PATH=$(jq -r '.commands // empty' "$TEMP_DIR/.claude-plugin/plugin.json")
+    if [ -n "$COMMANDS_PATH" ] && [ -d "$TEMP_DIR/$COMMANDS_PATH" ]; then
+        print_pass "Commands path resolves correctly: $COMMANDS_PATH"
+    elif [ -d "$TEMP_DIR/commands" ]; then
+        print_pass "Commands auto-discovered from $TEMP_DIR/commands/"
     else
-        print_fail "Commands path does not resolve"
+        print_fail "Commands path missing and no commands/ directory to auto-discover"
     fi
 
-    MCP_PATH=$(jq -r '.mcpServers' "$TEMP_DIR/.claude-plugin/plugin.json")
-    if [ -f "$TEMP_DIR/$MCP_PATH" ]; then
-        print_pass "MCP servers path resolves correctly"
+    AGENTS_PATH=$(jq -r '.agents // empty' "$TEMP_DIR/.claude-plugin/plugin.json")
+    if [ -n "$AGENTS_PATH" ] && [ -d "$TEMP_DIR/$AGENTS_PATH" ]; then
+        print_pass "Agents path resolves correctly: $AGENTS_PATH"
+    elif [ -d "$TEMP_DIR/agents" ]; then
+        print_pass "Agents auto-discovered from $TEMP_DIR/agents/"
     else
-        print_fail "MCP servers path does not resolve"
+        print_fail "Agents path missing and no agents/ directory to auto-discover"
+    fi
+
+    MCP_PATH=$(jq -r '.mcpServers // empty' "$TEMP_DIR/.claude-plugin/plugin.json")
+    if [ -n "$MCP_PATH" ] && [ -f "$TEMP_DIR/$MCP_PATH" ]; then
+        print_pass "MCP servers path resolves correctly: $MCP_PATH"
+    elif [ -f "$TEMP_DIR/.claude-plugin/.mcp.json" ]; then
+        print_pass "MCP servers config present at .claude-plugin/.mcp.json"
+    else
+        print_fail "MCP servers path missing and no .mcp.json fallback"
     fi
 }
 
@@ -231,34 +258,42 @@ test_environment_variables() {
     # Simulate what Claude Code would set
     export CLAUDE_PLUGIN_ROOT="$TEMP_DIR"
 
-    # Test that hook scripts use the environment variable correctly
-    if grep -q "CLAUDE_PLUGIN_ROOT" "$TEMP_DIR/hooks/scripts/check-daemon-status.sh"; then
-        print_pass "Hook scripts reference CLAUDE_PLUGIN_ROOT"
+    # Test that hook scripts resolve their plugin root correctly. The
+    # hooks/hooks.json manifest uses ${CLAUDE_PLUGIN_ROOT} to reference
+    # each hook command. The .sh scripts themselves derive the plugin
+    # root from BASH_SOURCE — both are correct, the test just needs to
+    # check the right place. The variable is set by Claude Code in the
+    # hook execution environment.
+    if grep -q "CLAUDE_PLUGIN_ROOT" "$TEMP_DIR/.claude-plugin/hooks.json"; then
+        print_pass "Hooks manifest references CLAUDE_PLUGIN_ROOT"
+    else
+        print_fail "Hooks manifest does not reference CLAUDE_PLUGIN_ROOT"
+    fi
 
-        # Test that the path would resolve correctly
-        HOOK_SCRIPT="$TEMP_DIR/hooks/scripts/check-daemon-status.sh"
-        if [ -x "$HOOK_SCRIPT" ]; then
-            print_pass "Hook script is executable"
+    HOOK_SCRIPT="$TEMP_DIR/hooks/scripts/check-daemon-status.sh"
+    if [ -x "$HOOK_SCRIPT" ]; then
+        print_pass "Hook script is executable"
 
-            # Test script execution (will fail due to missing Claude, but should run)
-            if timeout 5s bash "$HOOK_SCRIPT" >/dev/null 2>&1; then
-                print_pass "Hook script executes without syntax errors"
-            else
-                print_warn "Hook script has runtime dependencies (expected)"
-            fi
+        # Test script execution (will fail due to missing Claude, but should run)
+        if timeout 5s bash "$HOOK_SCRIPT" >/dev/null 2>&1; then
+            print_pass "Hook script executes without syntax errors"
         else
-            print_fail "Hook script is not executable"
+            print_warn "Hook script has runtime dependencies (expected)"
         fi
     else
-        print_fail "Hook scripts don't use CLAUDE_PLUGIN_ROOT"
+        print_fail "Hook script is not executable"
     fi
 
     print_test "Testing MCP server environment variables..."
 
-    if grep -q "CLAUDE_PLUGIN_ROOT" "$TEMP_DIR/mcp-server/nights-watch-server.sh"; then
-        print_pass "MCP server references CLAUDE_PLUGIN_ROOT"
+    # The MCP server reads NIGHTS_WATCH_ROOT (set by .mcp.json) or falls
+    # back to BASH_SOURCE to derive the plugin root. CLAUDE_PLUGIN_ROOT
+    # is the Claude Code variable; NIGHTS_WATCH_ROOT is the plugin's
+    # own convention. Either is acceptable.
+    if grep -q "NIGHTS_WATCH_ROOT\|BASH_SOURCE" "$TEMP_DIR/mcp-server/nights-watch-server.sh"; then
+        print_pass "MCP server resolves plugin root (NIGHTS_WATCH_ROOT or BASH_SOURCE)"
     else
-        print_fail "MCP server doesn't use CLAUDE_PLUGIN_ROOT"
+        print_fail "MCP server does not resolve plugin root"
     fi
 
     unset CLAUDE_PLUGIN_ROOT
@@ -299,11 +334,15 @@ test_core_scripts() {
     if [ -x "$DAEMON_SCRIPT" ]; then
         print_pass "Daemon script is executable"
 
-        # Test that script can parse its configuration without running
-        if timeout 3s bash -c "$DAEMON_SCRIPT --help 2>/dev/null || echo 'Script structure OK'" 2>/dev/null; then
+        # Test that script can parse its configuration without running.
+        # `bash -n` is a syntax-only check — doesn't execute the daemon
+        # (which would otherwise try to start a real monitoring loop and
+        # never return). The previous `timeout 3s bash -c "$SCRIPT --help"`
+        # was long enough to actually start the daemon in some envs.
+        if bash -n "$DAEMON_SCRIPT" 2>/dev/null; then
             print_pass "Daemon script structure is valid"
         else
-            print_fail "Daemon script has structural issues"
+            print_fail "Daemon script has syntax errors"
         fi
     else
         print_fail "Daemon script is not executable"
@@ -485,9 +524,15 @@ test_integration_points() {
 
     print_test "Testing plugin-to-daemon integration..."
 
-    # Test that manager script can find daemon script
+    # Test that manager script can find daemon script. `status` exits 1
+    # when the daemon isn't running (the correct, expected state during
+    # a fresh install) and 0 when it is. The previous check expected
+    # exit 0 only, which made every fresh test environment fail this
+    # assertion. Accept either — the script ran and reported status.
     if "$PLUGIN_ROOT/claude-nights-watch-manager.sh" status >/dev/null 2>&1; then
-        print_pass "Manager script can access daemon components"
+        print_pass "Manager script can access daemon components (daemon running)"
+    elif "$PLUGIN_ROOT/claude-nights-watch-manager.sh" status 2>&1 | grep -q "Daemon is not running\|not running"; then
+        print_pass "Manager script can access daemon components (daemon not running, as expected)"
     else
         print_fail "Manager script cannot access daemon components"
     fi
