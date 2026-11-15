@@ -188,14 +188,18 @@ EOF
 
 start_daemon() {
     local start_time="$1"
-    local args=""
+    local output
+    local exit_code
 
+    # Call the manager directly with the time as one quoted argument.
+    # (An earlier version built a command string and eval'd it, which ran
+    # any command substitution embedded in the tool argument.)
     if [ -n "$start_time" ]; then
-        args="--at \"$start_time\""
+        output=$("$MANAGER_SCRIPT" start --at "$start_time" 2>&1)
+    else
+        output=$("$MANAGER_SCRIPT" start 2>&1)
     fi
-
-    local output=$(eval "$MANAGER_SCRIPT start $args" 2>&1)
-    local exit_code=$?
+    exit_code=$?
 
     cat << EOF
 {

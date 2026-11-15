@@ -3,10 +3,11 @@
 # Hook: Session end prompt
 # Reminds users about daemon if task.md exists but daemon isn't running
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-PID_FILE="$PLUGIN_ROOT/logs/claude-nights-watch-daemon.pid"
-TASK_FILE="$(pwd)/task.md"
+# PID file lives in the project directory (CLAUDE_NIGHTS_WATCH_DIR or CWD),
+# where the daemon/manager write it — not the plugin directory.
+TASK_DIR="${CLAUDE_NIGHTS_WATCH_DIR:-$(pwd)}"
+PID_FILE="$TASK_DIR/logs/claude-nights-watch-daemon.pid"
+TASK_FILE="$TASK_DIR/task.md"
 
 # Check if task.md exists in current directory
 if [ -f "$TASK_FILE" ]; then

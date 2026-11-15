@@ -10,6 +10,8 @@ START_TIME_FILE="${CLAUDE_NIGHTS_WATCH_DIR:-$(dirname "$0")}/logs/claude-nights-
 TASK_FILE="task.md"
 RULES_FILE="rules.md"
 TASK_DIR="${CLAUDE_NIGHTS_WATCH_DIR:-$(pwd)}"
+# PID of a task run in progress, so cleanup can stop it ("" when idle)
+CLAUDE_JOB_PID=""
 
 # Ensure logs directory exists
 mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null
@@ -22,8 +24,22 @@ log_message() {
 # Function to handle shutdown
 cleanup() {
     log_message "Daemon shutting down..."
+    # Stop a task run in progress instead of orphaning it
+    if [ -n "$CLAUDE_JOB_PID" ]; then
+        pkill -TERM -P "$CLAUDE_JOB_PID" 2>/dev/null
+        kill "$CLAUDE_JOB_PID" 2>/dev/null
+    fi
     rm -f "$PID_FILE"
     exit 0
+}
+
+# Sleep that a trapped signal can interrupt immediately. A foreground
+# `sleep` defers the trap until the sleep finishes, which made stop
+# always escalate to kill -9 after the manager's 10s grace period.
+sleep_interruptible() {
+    sleep "$1" &
+    wait $! 2>/dev/null
+    return 0
 }
 
 # Set up signal handlers
@@ -79,7 +95,8 @@ get_ccusage_cmd() {
 
 # Function to get minutes until reset
 get_minutes_until_reset() {
-    local ccusage_cmd=$(get_ccusage_cmd)
+    local ccusage_cmd
+    ccusage_cmd=$(get_ccusage_cmd)
     if [ $? -ne 0 ]; then
         return 1
     fi
@@ -148,7 +165,9 @@ prepare_task_prompt() {
         prompt="IMPORTANT RULES TO FOLLOW:\n\n"
         prompt+=$(cat "$TASK_DIR/$RULES_FILE")
         prompt+="\n\n---END OF RULES---\n\n"
-        log_message "Applied rules from $RULES_FILE"
+        # >&2: this function's stdout is captured into the prompt,
+        # so log lines must not leak into what Claude receives
+        log_message "Applied rules from $RULES_FILE" >&2
     fi
     
     # Add task content
@@ -158,7 +177,7 @@ prepare_task_prompt() {
         prompt+="\n\n---END OF TASK---\n\n"
         prompt+="Please read the above task, create a todo list from it, and then execute it step by step."
     else
-        log_message "ERROR: Task file not found at $TASK_DIR/$TASK_FILE"
+        log_message "ERROR: Task file not found at $TASK_DIR/$TASK_FILE" >&2
         return 1
     fi
     
@@ -181,12 +200,15 @@ execute_task() {
     fi
     
     # Prepare the full prompt with rules and task
-    local full_prompt=$(prepare_task_prompt)
+    # (declare and assign separately: `local var=$(...)` masks the
+    # command's exit status, so a failed prepare was never detected)
+    local full_prompt
+    full_prompt=$(prepare_task_prompt)
     if [ $? -ne 0 ]; then
         return 1
     fi
     
-    log_message "Executing task with Claude (autonomous mode)..."
+    log_message "Executing task with Claude (autonomous mode)..." >&2
     
     # Log the full prompt being sent
     echo "" >> "$LOG_FILE"
@@ -197,18 +219,28 @@ execute_task() {
     
     # Execute task with Claude in autonomous mode
     # Log everything - both the execution and the response
-    log_message "=== CLAUDE RESPONSE START ==="
-    (echo -e "$full_prompt" | claude --dangerously-skip-permissions 2>&1) | tee -a "$LOG_FILE" &
-    local pid=$!
+    log_message "=== CLAUDE RESPONSE START ===" >&2
+    # Run in a background subshell and `wait` for it: `wait` is
+    # interruptible by traps (so SIGTERM stops the daemon promptly even
+    # mid-task), while a foreground pipeline defers the trap until
+    # Claude finishes. `pipefail` makes the subshell exit with Claude's
+    # status, not tee's — without that, every run looked successful and
+    # a crashed task was never retried.
+    (
+        set -o pipefail
+        echo -e "$full_prompt" | claude --dangerously-skip-permissions 2>&1 | tee -a "$LOG_FILE"
+    ) &
+    CLAUDE_JOB_PID=$!
     
     # Monitor execution (no timeout for complex tasks)
-    log_message "Task execution started (PID: $pid)"
+    log_message "Task execution started (PID: $CLAUDE_JOB_PID)" >&2
     
     # Wait for completion
-    wait $pid
+    wait "$CLAUDE_JOB_PID"
     local result=$?
+    CLAUDE_JOB_PID=""
     
-    log_message "=== CLAUDE RESPONSE END ==="
+    log_message "=== CLAUDE RESPONSE END ===" >&2
     
     if [ $result -eq 0 ]; then
         log_message "Task execution completed successfully"
@@ -320,16 +352,16 @@ main() {
             
             if [ "$hours" -gt 0 ]; then
                 log_message "Waiting for start time (${hours}h ${minutes}m remaining)..."
-                sleep 300  # Check every 5 minutes when waiting
+                sleep_interruptible 300  # Check every 5 minutes when waiting
             elif [ "$minutes" -gt 2 ]; then
                 log_message "Waiting for start time (${minutes}m ${seconds}s remaining)..."
-                sleep 60   # Check every minute when close
+                sleep_interruptible 60   # Check every minute when close
             elif [ "$time_until_start" -gt 10 ]; then
                 log_message "Waiting for start time (${minutes}m ${seconds}s remaining)..."
-                sleep 10   # Check every 10 seconds when very close
+                sleep_interruptible 10   # Check every 10 seconds when very close
             else
                 log_message "Waiting for start time (${seconds}s remaining)..."
-                sleep 2    # Check every 2 seconds when imminent
+                sleep_interruptible 2    # Check every 2 seconds when imminent
             fi
             continue
         fi
@@ -378,21 +410,21 @@ main() {
             if [ ! -f "$TASK_DIR/$TASK_FILE" ]; then
                 log_message "ERROR: Cannot execute - task file not found at $TASK_DIR/$TASK_FILE"
                 log_message "Waiting 5 minutes before next check..."
-                sleep 300
+                sleep_interruptible 300
                 continue
             fi
             
             # Wait a bit to ensure we're in the renewal window
-            sleep 60
+            sleep_interruptible 60
             
             # Try to execute task
             if execute_task; then
                 log_message "Task execution completed!"
                 # Sleep for 5 minutes after successful execution
-                sleep 300
+                sleep_interruptible 300
             else
                 log_message "Task execution failed, will retry in 1 minute"
-                sleep 60
+                sleep_interruptible 60
             fi
         fi
         
@@ -401,9 +433,11 @@ main() {
         log_message "Next check in $((sleep_duration / 60)) minutes"
         
         # Sleep until next check
-        sleep "$sleep_duration"
+        sleep_interruptible "$sleep_duration"
     done
 }
 
-# Start the daemon
-main
+# Start the daemon (unless sourced by a test — NIGHTS_WATCH_SOURCED=1)
+if [ "${NIGHTS_WATCH_SOURCED:-0}" != "1" ]; then
+    main
+fi
