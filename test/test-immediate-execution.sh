@@ -24,7 +24,9 @@ prepare_task_prompt() {
         prompt="IMPORTANT RULES TO FOLLOW:\n\n"
         prompt+=$(cat "$TASK_DIR/$RULES_FILE")
         prompt+="\n\n---END OF RULES---\n\n"
-        log_message "Applied rules from $RULES_FILE"
+        # >&2: this function's stdout is captured into the prompt,
+        # so log lines must not leak into what Claude receives
+        log_message "Applied rules from $RULES_FILE" >&2
     fi
     
     # Add task content
@@ -62,7 +64,10 @@ main() {
     
     # Prepare the full prompt with rules and task
     log_message "Preparing task prompt..."
-    local full_prompt=$(prepare_task_prompt)
+    # (declare and assign separately: `local var=$(...)` masks the
+    # command's exit status, so a failed prepare was never detected)
+    local full_prompt
+    full_prompt=$(prepare_task_prompt)
     if [ $? -ne 0 ]; then
         exit 1
     fi
@@ -95,8 +100,12 @@ main() {
     
     # Execute task with Claude and log everything
     log_message "=== CLAUDE RESPONSE START ==="
+    # pipefail: capture claude's status, not tee's (PIPESTATUS[0] would
+    # be echo's status — the first pipeline element)
+    set -o pipefail
     echo -e "$full_prompt" | claude --dangerously-skip-permissions 2>&1 | tee -a "$LOG_FILE"
-    local result=${PIPESTATUS[0]}
+    local result=$?
+    set +o pipefail
     log_message "=== CLAUDE RESPONSE END ==="
     
     if [ $result -eq 0 ]; then

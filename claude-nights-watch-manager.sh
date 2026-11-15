@@ -43,12 +43,16 @@ start_daemon() {
         if [[ "$START_TIME" =~ ^[0-9]{2}:[0-9]{2}$ ]]; then
             # Format: "HH:MM" - assume today
             START_TIME="$(date '+%Y-%m-%d') $START_TIME:00"
+        elif [[ "$START_TIME" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}$ ]]; then
+            # Format: "YYYY-MM-DD HH:MM" - append seconds so BSD date can
+            # parse it too (its -f format requires the full date-time)
+            START_TIME="$START_TIME:00"
         fi
         
         # Convert to epoch timestamp
         START_EPOCH=$(date -d "$START_TIME" +%s 2>/dev/null || date -j -f "%Y-%m-%d %H:%M:%S" "$START_TIME" +%s 2>/dev/null)
         
-        if [ $? -ne 0 ]; then
+        if [ -z "$START_EPOCH" ]; then
             print_error "Invalid time format. Use 'HH:MM' or 'YYYY-MM-DD HH:MM'"
             return 1
         fi

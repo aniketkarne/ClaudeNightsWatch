@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"start_daemon","arguments":{"start_time":"09:00$(touch EVAL-MARKER)"}}}

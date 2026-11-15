@@ -3,9 +3,10 @@
 # Hook: Check daemon status on session start
 # Displays a helpful message if daemon is running or suggests starting it
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-PID_FILE="$PLUGIN_ROOT/logs/claude-nights-watch-daemon.pid"
+# PID file lives in the project directory (CLAUDE_NIGHTS_WATCH_DIR or CWD),
+# where the daemon/manager write it — not the plugin directory.
+TASK_DIR="${CLAUDE_NIGHTS_WATCH_DIR:-$(pwd)}"
+PID_FILE="$TASK_DIR/logs/claude-nights-watch-daemon.pid"
 
 # Only show status if PID file exists
 if [ -f "$PID_FILE" ]; then
